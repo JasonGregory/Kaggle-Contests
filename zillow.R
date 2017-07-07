@@ -10,6 +10,8 @@
 
 # Load libraries ---------
 library(tidyverse)
+library(dplyr)
+library(moments)
 library(dataFun)
 
 # Initial data load & write ----------
@@ -54,41 +56,79 @@ write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
     tst <- spread(Var1, value)
     
     iData %>% summarise_all(funs(n_distinct,mean))
+    test <- iData %>% 
+      summarise_all(funs(mean(., na.rm = TRUE)))
     
-    
-    summaryFns = list(
-      n_distinct,
-      mean)
-    
-    str(tst) <- apply(summaryFns, function(fn){iData %>% summarise_all(fn)})
-    
-    as.tibble(tst)
-    
-    ?vars
+    test %>% unlist() %>% print(width = Inf)
+
+# Description Function ----------------------------------------------------
+    # List in notes that for skew (-.5 to .5 fairly symmetrical, -1 to .5 maderatly skewed, -1 or greater highly skewed)
+    # List in notes that kurtosis measures the tail-heaviness (close to 0 normal distribution, less than 0 light tailed, greater than 0 heavier tails)
 
     
-    ?funs
-    ?system.time()
+prep_describe <- function(data) {
+  
+}
 
-    ?summarise_all
+summaryFnsNum = list(
+  total_count = function(x) length(x),
+  dist_count = n_distinct,
+  null_count = function(x) sum(is.na(x)),
+  mean  = function(x) mean(x, na.rm = TRUE),
+  median = function(x) median(x, na.rm = TRUE),
+  standard_deviation = function(x) sd(x, na.rm = TRUE),
+  kurtosis = function(x) kurtosis(x, na.rm = TRUE),
+  skew = function(x) skewness(x, na.rm = TRUE),
+  max = function(x) max(x, na.rm = TRUE),
+  min = function(x) min(x, na.rm = TRUE)
+)    
     
-    library("parallel")
     
-    ?n_distinct
+summaryFnsAll = list(
+  total_count = function(x) length(x),
+  dist_count = n_distinct,
+  null_count = function(x) sum(is.na(x)),
+  mean  = function(x) mean(x, na.rm = TRUE),
+  median = function(x) median(x, na.rm = TRUE),
+  standard_deviation = function(x) sd(x, na.rm = TRUE),
+  max = function(x) max(x, na.rm = TRUE),
+  min = function(x) min(x, na.rm = TRUE)
+)
+
+# look into useing the multi cor version of sapply & also into compiling the function
+
+data <- iData
+
+numeric_data <- as.data.frame(sapply(summaryFnsNum, function(fn){data %>% select_if(is.numeric) %>% summarise_all(fn)}))
+numeric_data <- numeric_data %>%
+  rownames_to_column(var = "Variable") %>%
+  unnest()
+
+all_data <- as.data.frame(sapply(summaryFnsAll, function(fn){data %>% summarise_all(fn)}))
+all_data <- all_data %>%
+  rownames_to_column(var = "Variable") %>%
+  unnest()
     
-    parLapply(); parApply(); parSapply()
-    
-    
-    file.size(iData); file.size(iDT)
+numeric_data; all_data    
+
+unnest(all_data)
+
+
+library("parallel")
+
+?n_distinct
+
+parLapply(); parApply(); parSapply()
+
+
+file.size(iData); file.size(iDT)
     
 
 
 
 
   # Modifying the code in dataPrep (needs to be quicker)
-    prep_summary <- function(data) {
-      
-    }
+
 
 
 propertyData %>%
