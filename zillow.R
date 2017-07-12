@@ -24,13 +24,20 @@
 library(tidyverse)
 library(dplyr)
 library(moments)
-library(dataFun)
+# library(dataFun)
 library(stringr)
 library(forcats)
 library(vtreat)
 library(lubridate)
+library(gridExtra)
 options(max.print=999999)
 options(scipen=999)
+
+
+# Additional to-do Items --------------------------------------------------
+  # The inital prep state would show plots for outliers, the variable being predicted, describe tables
+    # null values & distinct values. In addition it would show any prep functions to use. Possibly date fields..
+
 
 # Initial data load & write -----------------------------------------------
 (trainData <- read_csv(normalizePath("data/zillow/train_2016_v2.csv")))
@@ -49,57 +56,102 @@ write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
 
 # Initial look at files ---------------------------------------------------
 (t_describe <- prep_describe(train_data))
-t_describe %>% 
-  select(variable, max, min, skew, kurtosis)
 
 # Index plot of logerrors (good for looking for outliers)
-train_data %>%
+# Add descriptions of outlier/no-outlier
+plot1 <- train_data %>%
   mutate(index = row_number(logerror)) %>%
   ggplot(aes(x = index, y = logerror)) +
-    geom_point(alpha = 1/12)
+  geom_point(alpha = 1/12) +
+  labs(title = "With outliers")
 
-# Filter out outliers (create function for this)
-train2 <- train_data %>%
-  filter(logerror <= quantile(logerror, 0.99), logerror >= quantile(logerror, 0.01))
-
-train2 %>%
+plot2 <- prep_outlier(train_data) %>%
   mutate(index = row_number(logerror)) %>%
   ggplot(aes(x = index, y = logerror)) +
-  geom_point(alpha = 1/12)
+  geom_point(alpha = 1/12) +
+  labs(title = "Without outliers")
+
+grid.arrange(plot1, plot2, ncol=2)
 
 # Histogram of logerror
-train2 %>%
+# Add descriptions of skew, outlier/no-outlier
+plot1 <- train_data %>%
   ggplot(aes(x = logerror)) +
-  geom_histogram(bins = nrow(train2)^(1/3))
+  geom_histogram(bins = nrow(train_data)^(1/3)) +
+  labs(title = "With outliers") #+ 
+  #annotate("text", x=max(train_data$logerror)*.8, y=0, label = "Test", parse=T)  
+
+temp_data <- prep_outlier(train_data)
+plot2 <- prep_outlier(temp_data) %>%
+  ggplot(aes(x = logerror)) +
+  geom_histogram(bins = nrow(temp_data)^(1/3)) +
+  labs(title = "Without outliers") #+ 
+  #annotate("text", x=max(temp_data$logerror)*.8, y=0, label = "Test", parse=T)  
+
+grid.arrange(plot1, plot2, ncol=2)
+
+# Annotation logic. Work on later.
+
+# equation = function(x) {
+#   lm_coef <- list(a = round(coef(x)[1], digits = 2),
+#                   b = round(coef(x)[2], digits = 2),
+#                   r2 = round(summary(x)$r.squared, digits = 2));
+#   lm_eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(R)^2~"="~r2,lm_coef)
+#   as.character(as.expression(lm_eq));                 
+# }
+
+# +
+#   annotate("rect", xmin = 0.00, xmax = 0.1, ymin = -0.056, ymax = -0.044, fill="white", colour="red") +
+#   annotate("text", x = 0.05, y = -0.05, label = equation(fit), parse = TRUE)
 
 # Looking at transaction dates
+# Eventually have this applied to any date fields.
+plot1 <- train_data %>%
+  ggplot(aes(x = transactiondate)) +
+  geom_bar() +
+  labs(title = "By Date")  
 
-
-train_data %>%
-  mutate(index = row_number(transactiondate)) %>%
-  ggplot(aes(x = index, y = transactiondate)) +
-  geom_point(alpha = 1/12)
-
-train_data %>%
-  mutate(month = month(transactiondate)) %>%
+plot2 <- train_data %>%
+  mutate(month = as.factor(month(transactiondate))) %>%
   ggplot(aes(x = month)) +
-  geom_bar()
+  geom_bar() +
+  labs(title = "By Month")
 
-  
+plot3 <- train_data %>%
+  mutate(year = as.factor(year(transactiondate))) %>%
+  ggplot(aes(x = year)) +
+  geom_bar() +
+  labs(title = "By Year")  
 
-
+grid.arrange(plot1, plot2, plot3, nrow=3)
 
 
 # Determine how rows are distinct -----------------------------------------
+i_data %>% select_if(function(col) n_distinct(col) == NROW(col))
+
+select(column) %>% unlist(use.names = list_name)
+
+describe %>% filter(null_perc > .6) %>% select(variable) %>% unlist(use.names = FALSE)
+
+
+
+train_data %>%
+  summarise(n_distinct(logerror))
+
+
+n_distinct(col)
+?n_distinct()
+train_data %>% nrow() 
+
+
 (describe <- prep_describe(i_data))
-prep_desc_distinct(describe) 
+prep_desc_distinct(describe)
 variables_unique <- prep_desc_distinct(describe)$variable 
 
 # Pull in Outcome Variable ------------------------------------------------
 test <- i_data %>%
   left_join(train_data, by = "parcelid") %>% select(parcelid, logerror, transactiondate, everything()) 
 
-test %>% filter(is.na(logerror))
 
 
 
@@ -170,6 +222,13 @@ prep_replaceNull <- function (dta, columns, null_value = "Missing") {
     }
     )
   dta[columns]
+}
+
+prep_outlier <- function(data, floor = .01, roof = .99) {
+  no_outlier <- data %>%
+    filter(logerror <= quantile(logerror, roof), logerror >= quantile(logerror, floor)) 
+  
+  return(no_outlier)
 }
 
 prep_select <- function(column, list_name = FALSE) { #Wrapper around select to return list
@@ -254,7 +313,14 @@ prep_desc_plotdistinct <- function(describe) {
       geom_point() +
       geom_text(aes(label=dist_count),hjust=0, vjust=0)      
 }  
+
+prep_distinct <- function(data) {
+  data %>% 
+    select_if(function(col) n_distinct(col) == NROW(col))  
   
+  
+}
+
 prep_desc_distinct <- function(describe) {
     describe %>% 
       filter(total_count == dist_count) %>% 
