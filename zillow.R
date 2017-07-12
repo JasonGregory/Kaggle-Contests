@@ -27,6 +27,8 @@ library(moments)
 library(dataFun)
 library(stringr)
 library(forcats)
+library(vtreat)
+library(lubridate)
 options(max.print=999999)
 options(scipen=999)
 
@@ -40,23 +42,74 @@ write_rds(propertyData, normalizePath("data/zillow/propertyData.rds"))
 write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
 
 # Read in data ------------------------------------------------------------
-# (iData <- read_rds(normalizePath("data/zillow/propertyData.rds")))
-(iData <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
-(trainData <- read_rds(normalizePath("data/zillow/trainData.rds")))
+# (i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
+(i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
+(train_data <- read_rds(normalizePath("data/zillow/trainData.rds")))
   # (dataDict <- rio::import(normalizePath("data/zillow/zillow_data_dictionary.xlsx")))
 
+# Initial look at files ---------------------------------------------------
+(t_describe <- prep_describe(train_data))
+t_describe %>% 
+  select(variable, max, min, skew, kurtosis)
+
+# Index plot of logerrors (good for looking for outliers)
+train_data %>%
+  mutate(index = row_number(logerror)) %>%
+  ggplot(aes(x = index, y = logerror)) +
+    geom_point(alpha = 1/12)
+
+# Filter out outliers (create function for this)
+train2 <- train_data %>%
+  filter(logerror <= quantile(logerror, 0.99), logerror >= quantile(logerror, 0.01))
+
+train2 %>%
+  mutate(index = row_number(logerror)) %>%
+  ggplot(aes(x = index, y = logerror)) +
+  geom_point(alpha = 1/12)
+
+# Histogram of logerror
+train2 %>%
+  ggplot(aes(x = logerror)) +
+  geom_histogram(bins = nrow(train2)^(1/3))
+
+# Looking at transaction dates
+
+
+train_data %>%
+  mutate(index = row_number(transactiondate)) %>%
+  ggplot(aes(x = index, y = transactiondate)) +
+  geom_point(alpha = 1/12)
+
+train_data %>%
+  mutate(month = month(transactiondate)) %>%
+  ggplot(aes(x = month)) +
+  geom_bar()
+
+  
+
+
+
+
 # Determine how rows are distinct -----------------------------------------
-(describe <- prep_describe(iData))
-prep_describe_distinct(describe) 
-variables_unique <- prep_describe_distinct(describe)$variable 
+(describe <- prep_describe(i_data))
+prep_desc_distinct(describe) 
+variables_unique <- prep_desc_distinct(describe)$variable 
+
+# Pull in Outcome Variable ------------------------------------------------
+test <- i_data %>%
+  left_join(train_data, by = "parcelid") %>% select(parcelid, logerror, transactiondate, everything()) 
+
+test %>% filter(is.na(logerror))
+
+
 
 # Remove parcelid since it's unique -------------
-variables_explanatory <- iData %>% select(-one_of(variables_unique)) %>% colnames()
+variables_explanatory <- i_data %>% select(-one_of(variables_unique)) %>% colnames()
 
 # Analyze Null Values -----------------------------------------------------
 describe %>%
   filter(variable %in% variables_explanatory) %>%
-  prep_describe_plot_null()
+  prep_desc_plotnull()
 
 # Remove variables with > 60% NULL. Possibly analyze later. 
 variables_null <- describe %>% filter(null_perc > .6) %>% select(variable) %>% unlist(use.names = FALSE)
@@ -66,11 +119,10 @@ variables_explanatory <- setdiff(variables_explanatory, variables_null)
 variables_potential <- describe %>% filter(variable %in% variables_explanatory, null_perc > .3) %>% select(variable) %>% unlist(use.names = FALSE)
 variables_explanatory <- setdiff(variables_explanatory, variables_potential)
 
-
 # Analyze Variable Types --------------------------------------------------
 describe %>%
   filter(variable %in% variables_explanatory) %>%
-  prep_describe_plot_dist()
+  prep_desc_plotdistinct()
 
 # Analyze location variables later 
 variables_potential <- c(variables_potential, "longitude", "latitude", "rawcensustractandblock", "censustractandblock")
@@ -86,13 +138,26 @@ variable_factors <- c(variable_factors, "regionidcity", "propertycountylanduseco
 
 (c_data <- i_data %>% select(one_of(variables_explanatory)) %>% mutate_at(variable_factors, as.factor))
 
-# Replace factor variable null values
+# Replace factor variable null values (don't always need to run this section)
 c_data[variable_factors] <- prep_replaceNull(c_data, variable_factors)
 prep_describe(c_data)
 
-# Re-analyze mssing values
+# Re-analyze mssing values with plot
 VIM::aggr(c_data, numbers=TRUE)
 
+
+# Variable Importance -----------------------------------------------------
+c_data
+
+
+
+# Functions ---------------------------------------------------------------
+  # List in notes that for skew (-.5 to .5 fairly symmetrical, -1 to .5 maderatly skewed, -1 or greater highly skewed)
+  # List in notes that kurtosis measures the tail-heaviness (close to 0 normal distribution, less than 0 light tailed, greater than 0 heavier tails)
+
+dataFun_instructions <- function() { # This would provide instructions on how to use the package.
+
+}
 
 prep_replaceNull <- function (dta, columns, null_value = "Missing") {
   dta[columns] <-
@@ -107,22 +172,9 @@ prep_replaceNull <- function (dta, columns, null_value = "Missing") {
   dta[columns]
 }
 
-
-
-(c_describe <- prep_describe(c_data))
-
-c_describe
-
-c_data %>%
-  count(bedroomcnt) %>% print(n = Inf)
-
-
-# Functions ------------------------
-  # List in notes that for skew (-.5 to .5 fairly symmetrical, -1 to .5 maderatly skewed, -1 or greater highly skewed)
-  # List in notes that kurtosis measures the tail-heaviness (close to 0 normal distribution, less than 0 light tailed, greater than 0 heavier tails)
-
-dataFun_instructions <- function() { # This would provide instructions on how to use the package.
-
+prep_select <- function(column, list_name = FALSE) { #Wrapper around select to return list
+  # Having issues with this function. Need to figure out with lazy val what is needed.
+  select(column) %>% unlist(use.names = list_name)
 }
 
 prep_describe <- function(data) {
@@ -136,13 +188,24 @@ prep_describe <- function(data) {
   )
   
   summaryFnsAll = list(
-    class = class,
     total_count = function(x) length(x),
     dist_count = n_distinct,
     null_count = function(x) sum(is.na(x)),
     mean  = function(x) mean(x, na.rm = TRUE),
     standard_deviation = function(x) sd(x, na.rm = TRUE)
   )    
+  
+  summaryFnsClass = list(
+    class = class
+  )
+
+  class_data <- as.data.frame(sapply(summaryFnsClass, function(fn){data %>% summarise_all(fn)}))
+  class_data <- class_data %>%
+    rownames_to_column(var = "variable") %>%
+    unnest()
+  
+  data <- data %>% 
+    mutate_if(is.Date, function(x) as.numeric(format(x, "%Y%m%d")))  
 
   numeric_data <- as.data.frame(sapply(summaryFnsNum, function(fn){data %>% select_if(is.numeric) %>% summarise_all(fn)}))
   numeric_data <- numeric_data %>%
@@ -155,7 +218,8 @@ prep_describe <- function(data) {
     unnest()
   
   describe <- all_data %>%
-    left_join(numeric_data, by = "variable") %>% 
+    left_join(numeric_data, by = "variable") %>%
+    left_join(class_data, by = "variable") %>%
     as_tibble()
   
   describe <- describe %>%
@@ -167,7 +231,7 @@ prep_describe <- function(data) {
 
 }
 
-prep_describe_plot_null <- function(describe) { # eventually combine 2 functions below.
+prep_desc_plotnull <- function(describe) { # eventually combine 2 functions below.
 #    if (type == "null") {
     describe %>%
       ggplot(aes(x = null_perc, y = reorder(variable, null_perc))) +
@@ -182,8 +246,8 @@ prep_describe_plot_null <- function(describe) { # eventually combine 2 functions
 #        geom_text(aes(label=dist_count),hjust=0, vjust=0)      
 #    }
 }
-  
-prep_describe_plot_dist <- function(describe) {
+
+prep_desc_plotdistinct <- function(describe) {
    describe %>%
       ggplot(aes(x = dist_perc, y = reorder(variable, dist_perc))) +
       geom_segment(aes(yend = variable), xend = 0) +
@@ -191,7 +255,7 @@ prep_describe_plot_dist <- function(describe) {
       geom_text(aes(label=dist_count),hjust=0, vjust=0)      
 }  
   
-prep_describe_distinct <- function(describe) {
+prep_desc_distinct <- function(describe) {
     describe %>% 
       filter(total_count == dist_count) %>% 
       select(variable, class, total_count, dist_count, min, max) %>%
