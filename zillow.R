@@ -1,3 +1,7 @@
+# Misc --------------------------------------------------------------------
+  # Re-organize the prepare stage. 1st pull in data; 2nd describe the data; 3rd Null and distinct values; 4th Rectegorize the variables  
+  # Explore the variables relative to the explanatory variable
+
 # Next Tasks --------------------------------------------------------------
   # Final touches on the describe function (percentage null, make into function, etc.)
   # Look into removing variables with mostly null values & removing id variables
@@ -49,13 +53,77 @@ write_rds(propertyData, normalizePath("data/zillow/propertyData.rds"))
 write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
 
 # Read in data ------------------------------------------------------------
-# (i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
-(i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
+(i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
+# (i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
 (train_data <- read_rds(normalizePath("data/zillow/trainData.rds")))
   # (dataDict <- rio::import(normalizePath("data/zillow/zillow_data_dictionary.xlsx")))
 
 # Initial look at files ---------------------------------------------------
+(i_describe <- prep_describe(i_data))
 (t_describe <- prep_describe(train_data))
+i_describe %>% print(n = Inf)
+t_describe %>% print(n = Inf)
+
+(var_distinct <- prep_distinct(i_describe))
+prep_distinct(t_describe)
+
+# Join data -----------------------------------------
+n1_data <- i_data %>%
+  inner_join(train_data, by = "parcelid")
+
+(n1_describe <- prep_describe(n1_data))
+
+# Variable Prep -----------------------------------------------------------
+
+# Remove unique variables and set outcome variable-------------
+var_outcome <- "logerror"
+var_explanatory <- setdiff(n1_data %>% colnames(), c(var_outcome, var_distinct))
+
+  
+# Analyze null and distinct values --------------
+prep_plot(filter(n1_describe, variable %in% var_explanatory))
+
+var_null <- n1_describe %>% filter(variable %in% var_explanatory, null_perc >= .25) %>% prep_select(variable)
+var_explanatory <- setdiff(var_explanatory, var_null)
+prep_plot(filter(n1_describe, variable %in% var_explanatory))
+
+# Analyze location variables later 
+var_location <- c("longitude", "latitude", "rawcensustractandblock", "censustractandblock")
+var_explanatory <- setdiff(var_explanatory, var_location)
+prep_plot(filter(n1_describe, variable %in% var_explanatory))
+
+# Create factor variables
+
+  # add the following logic to the function.
+temp <- n1_describe %>% filter(variable %in% var_explanatory) %>% arrange(desc(dist_count)) %>% prep_select(variable)
+  #
+
+prep_table(n1_data %>% select(temp), n_row = 10)
+
+prep_table(n1_data, vars = "taxamount")
+
+
+n1_describe %>% 
+  select(variable, dist_perc, everything()) %>%
+  filter(variable %in% var_explanatory) %>%
+  arrange(desc(dist_perc)) %>%
+  print(n = Inf)
+
+## insert table function
+
+var_factors <- n1_describe %>% 
+  filter(variable %in% var_explanatory, dist_count < 40) %>% 
+  prep_select(variable)
+
+
+variable_factors <- c(variable_factors, "regionidcity", "propertycountylandusecode", "regionidzip")
+
+(c_data <- i_data %>% select(one_of(variables_explanatory)) %>% mutate_at(variable_factors, as.factor))
+
+# Replace factor variable null values (don't always need to run this section)
+c_data[variable_factors] <- prep_replaceNull(c_data, variable_factors)
+prep_describe(c_data)
+
 
 # Index plot of logerrors (good for looking for outliers)
 # Add descriptions of outlier/no-outlier
@@ -79,14 +147,14 @@ plot1 <- train_data %>%
   ggplot(aes(x = logerror)) +
   geom_histogram(bins = nrow(train_data)^(1/3)) +
   labs(title = "With outliers") #+ 
-  #annotate("text", x=max(train_data$logerror)*.8, y=0, label = "Test", parse=T)  
+#annotate("text", x=max(train_data$logerror)*.8, y=0, label = "Test", parse=T)  
 
 temp_data <- prep_outlier(train_data)
 plot2 <- prep_outlier(temp_data) %>%
   ggplot(aes(x = logerror)) +
   geom_histogram(bins = nrow(temp_data)^(1/3)) +
   labs(title = "Without outliers") #+ 
-  #annotate("text", x=max(temp_data$logerror)*.8, y=0, label = "Test", parse=T)  
+#annotate("text", x=max(temp_data$logerror)*.8, y=0, label = "Test", parse=T)  
 
 grid.arrange(plot1, plot2, ncol=2)
 
@@ -126,73 +194,8 @@ plot3 <- train_data %>%
 grid.arrange(plot1, plot2, plot3, nrow=3)
 
 
-# Determine how rows are distinct -----------------------------------------
-i_data %>% select_if(function(col) n_distinct(col) == NROW(col))
-
-select(column) %>% unlist(use.names = list_name)
-
-describe %>% filter(null_perc > .6) %>% select(variable) %>% unlist(use.names = FALSE)
 
 
-
-train_data %>%
-  summarise(n_distinct(logerror))
-
-
-n_distinct(col)
-?n_distinct()
-train_data %>% nrow() 
-
-
-(describe <- prep_describe(i_data))
-prep_desc_distinct(describe)
-variables_unique <- prep_desc_distinct(describe)$variable 
-
-# Pull in Outcome Variable ------------------------------------------------
-test <- i_data %>%
-  left_join(train_data, by = "parcelid") %>% select(parcelid, logerror, transactiondate, everything()) 
-
-
-
-
-# Remove parcelid since it's unique -------------
-variables_explanatory <- i_data %>% select(-one_of(variables_unique)) %>% colnames()
-
-# Analyze Null Values -----------------------------------------------------
-describe %>%
-  filter(variable %in% variables_explanatory) %>%
-  prep_desc_plotnull()
-
-# Remove variables with > 60% NULL. Possibly analyze later. 
-variables_null <- describe %>% filter(null_perc > .6) %>% select(variable) %>% unlist(use.names = FALSE)
-variables_explanatory <- setdiff(variables_explanatory, variables_null)
-
-# Filter out variables between 30% and 40% NULL values to analyze later
-variables_potential <- describe %>% filter(variable %in% variables_explanatory, null_perc > .3) %>% select(variable) %>% unlist(use.names = FALSE)
-variables_explanatory <- setdiff(variables_explanatory, variables_potential)
-
-# Analyze Variable Types --------------------------------------------------
-describe %>%
-  filter(variable %in% variables_explanatory) %>%
-  prep_desc_plotdistinct()
-
-# Analyze location variables later 
-variables_potential <- c(variables_potential, "longitude", "latitude", "rawcensustractandblock", "censustractandblock")
-variables_explanatory <- setdiff(variables_explanatory, variables_potential)
-
-describe %>%
-  filter(variable %in% variables_explanatory) %>%
-  arrange(dist_perc)
-
-# Create factor variables
-variable_factors <- describe %>% filter(dist_count < 40, variable %in% variables_explanatory) %>% select(variable) %>% unlist(use.names = FALSE)
-variable_factors <- c(variable_factors, "regionidcity", "propertycountylandusecode", "regionidzip")
-
-(c_data <- i_data %>% select(one_of(variables_explanatory)) %>% mutate_at(variable_factors, as.factor))
-
-# Replace factor variable null values (don't always need to run this section)
-c_data[variable_factors] <- prep_replaceNull(c_data, variable_factors)
-prep_describe(c_data)
 
 # Re-analyze mssing values with plot
 VIM::aggr(c_data, numbers=TRUE)
@@ -202,13 +205,25 @@ VIM::aggr(c_data, numbers=TRUE)
 c_data
 
 
-
 # Functions ---------------------------------------------------------------
   # List in notes that for skew (-.5 to .5 fairly symmetrical, -1 to .5 maderatly skewed, -1 or greater highly skewed)
   # List in notes that kurtosis measures the tail-heaviness (close to 0 normal distribution, less than 0 light tailed, greater than 0 heavier tails)
 
-dataFun_instructions <- function() { # This would provide instructions on how to use the package.
-
+prep_distinct <- function(data) {
+  if (colnames(select(data, 1)) == "variable") {
+    distinct <- data %>%
+      filter(total_count == dist_count) %>%
+      #    select(variable, class, total_count, dist_count, min, max) %>%
+      prep_select(variable)
+    
+    if (length(distinct) == 0L) return(NULL) else return(distinct)  
+  } else {
+    distinct <- data %>% 
+      select_if(function(col) n_distinct(col) == NROW(col)) %>%
+      colnames() 
+    
+    if (length(distinct) == 0L) return(NULL) else return(distinct)
+  }
 }
 
 prep_replaceNull <- function (dta, columns, null_value = "Missing") {
@@ -231,9 +246,12 @@ prep_outlier <- function(data, floor = .01, roof = .99) {
   return(no_outlier)
 }
 
-prep_select <- function(column, list_name = FALSE) { #Wrapper around select to return list
-  # Having issues with this function. Need to figure out with lazy val what is needed.
-  select(column) %>% unlist(use.names = list_name)
+# Wrapper function for select. Turns a vector into a character string.
+prep_select <- function(data, column, list_name = FALSE) { 
+  column <- enquo(column)
+  data %>%
+    select(!!column) %>%
+    unlist(use.names = list_name)
 }
 
 prep_describe <- function(data) {
@@ -290,45 +308,107 @@ prep_describe <- function(data) {
 
 }
 
-prep_desc_plotnull <- function(describe) { # eventually combine 2 functions below.
-#    if (type == "null") {
-    describe %>%
-      ggplot(aes(x = null_perc, y = reorder(variable, null_perc))) +
-      geom_segment(aes(yend = variable), xend = 0) +
-      geom_point() +
-      geom_text(aes(label=round(null_perc,2)),hjust=0, vjust=0)
-#    } else {
-#     describe %>%
-#        ggplot(aes(x = dist_perc, y = reorder(variable, dist_perc))) +
-#        geom_segment(aes(yend = variable), xend = 0) +
-#        geom_point() +
-#        geom_text(aes(label=dist_count),hjust=0, vjust=0)      
-#    }
+prep_table <- function(data, n_dist = 80, vars = NULL, n_row = 15) { # Bring in describe table to make quicker
+  
+  data <- if (is.null(vars)) data else select(data, vars)
+  
+  if (n_dist == 80) {
+    if (ncol(data)*nrow(data) > 90000000) {
+      ncol1 <- ncol(data)      
+      data <- data %>% 
+        select_if(function(col) n_distinct(col) <= n_dist)
+      ncol2 <- ncol(data)
+      
+      if (ncol1 - ncol2 > 0) {
+        message_description <- paste(ncol1 - ncol2, "columns filtered. Only columns with <= 80 distinct values included. Use n_dist argument to modify.")
+      } else {     
+        message_description <- NULL
+      }
+    }
+    else {
+      message_description <- NULL
+    }
+  } else {
+    ncol1 <- ncol(data)
+    data <- data %>% 
+      select_if(function(col) n_distinct(col) <= n_dist)
+    ncol2 <- ncol(data)
+    
+    if (ncol1 - ncol2 == 0) {
+      message_description <- paste("All columns have less unique values than", n_dist)
+    } else {
+      message_description <- paste(ncol1 - ncol2, "columns were filtered with over", n_dist, "unique values.")
+    }
+  }
+  
+  ncol <- ncol(data)
+  
+  for(i in 1:ncol) {
+    var <- data %>% 
+      select(i) %>% colnames()  
+    
+    data %>%
+      group_by_at(var) %>% 
+      tally() %>% 
+      arrange(desc(n)) %>%
+      print(n = n_row)
+    
+    cat("\n")
+  }
+  
+  if (!is.null(message_description)) {
+    message(message_description) 
+  }
 }
 
-prep_desc_plotdistinct <- function(describe) {
-   describe %>%
-      ggplot(aes(x = dist_perc, y = reorder(variable, dist_perc))) +
-      geom_segment(aes(yend = variable), xend = 0) +
-      geom_point() +
-      geom_text(aes(label=dist_count),hjust=0, vjust=0)      
-}  
+prep_plot <- function(data, plot_type = "all") {
+  if (colnames(select(data, 1)) == "variable") {
+    if (plot_type == "all") {
+      plot1 <- data %>%
+        ggplot(aes(x = reorder(variable, null_perc), y = null_perc)) +
+        geom_bar(stat = "identity") + 
+        scale_y_continuous(expand = c(0,0)) +
+        labs(x = "Variable", y = "Null %") +
+        coord_flip()
+      
+      plot2 <- data %>%
+        ggplot(aes(x = reorder(variable, dist_perc), y = dist_perc)) +
+        geom_bar(stat = "identity") + 
+        scale_y_continuous(expand = c(0,0)) +
+        labs(x = "Variable", y = "Distinct %") +
+        coord_flip()
+      
+      return(grid.arrange(plot1, plot2, ncol=2))
+    } else if (plot_type == "null") {
+      plot <- data %>%
+        ggplot(aes(x = reorder(variable, null_perc), y = null_perc)) +
+        geom_bar(stat = "identity") + 
+        scale_y_continuous(expand = c(0,0)) +
+        labs(x = "Variable", y = "Null %") +
+        coord_flip()
+      
+      return(plot)
+    } else if (plot_type == "distinct") {
+      plot <- data %>%
+        ggplot(aes(x = reorder(variable, dist_perc), y = dist_perc)) +
+        geom_bar(stat = "identity") + 
+        scale_y_continuous(expand = c(0,0)) +
+        labs(x = "Variable", y = "Distinct %") +
+        coord_flip()
+      
+      return(plot)
+    } else {
+      NULL
+    }
+  } else {
+    NULL #data %>%
+  }
+}
 
-prep_distinct <- function(data) {
-  data %>% 
-    select_if(function(col) n_distinct(col) == NROW(col))  
-  
+dataFun_instructions <- function() { # This would provide instructions on how to use the package.
   
 }
 
-prep_desc_distinct <- function(describe) {
-    describe %>% 
-      filter(total_count == dist_count) %>% 
-      select(variable, class, total_count, dist_count, min, max) %>%
-      return()
-}
-  
-  
 prep_report <- function() { # same as prepIt
 
 }
@@ -348,32 +428,34 @@ explore_categorical <- function() {
 explore_numeric <- function() {
   
 }
-  
 
-  # misc logic to analyze data
-  describe %>% filter(class %in% c("integer", "numeric"))
-  describe %>% filter(!str_detect(variable, "id"), class %in% c("integer", "numeric")) %>% select(variable, kurtosis) %>% print(n = Inf)
-  describe %>% filter(!str_detect(variable, "id"), null_perc < .05) %>% arrange(dist_perc) %>% print(n = Inf) # possibly do plot for this & null variables
-    #Potential factor variables
-      describe %>% filter(class == "character") %>% arrange(dist_perc) # possibly plot this by variable type
-  select(iData, contains("id"))
-  
-  # logic to select based on null percentage value
-  varKeep <- describe %>% 
-    filter(null_perc < .05) %>%
-    select(variable) %>% unlist()
-  
-  iData %>% select(varKeep)
 
-  # Need to figure out how to deal with larger data. Should I sample it or should I re-code it? Use a data table?
-    
-    # Target methods that take 5 seconds or less. 
-      # First work on summaries that work on the whole data set really quick (either using data tables or not). Look into using parallel apply, etc.
-      # Second work on summaries that need to take a sample of the data (such as sample)
+# Misc Notes --------------------------------------------------------------
 
-      # Documentation on sampling
-        # https://rdrr.io/cran/dplyr/man/sample.html
-        # https://stackoverflow.com/questions/21255366/sample-rows-of-subgroups-from-dataframe-with-dplyr
+# misc logic to analyze data
+describe %>% filter(class %in% c("integer", "numeric"))
+describe %>% filter(!str_detect(variable, "id"), class %in% c("integer", "numeric")) %>% select(variable, kurtosis) %>% print(n = Inf)
+describe %>% filter(!str_detect(variable, "id"), null_perc < .05) %>% arrange(dist_perc) %>% print(n = Inf) # possibly do plot for this & null variables
+  #Potential factor variables
+    describe %>% filter(class == "character") %>% arrange(dist_perc) # possibly plot this by variable type
+select(iData, contains("id"))
+
+# logic to select based on null percentage value
+varKeep <- describe %>% 
+  filter(null_perc < .05) %>%
+  select(variable) %>% unlist()
+
+iData %>% select(varKeep)
+
+# Need to figure out how to deal with larger data. Should I sample it or should I re-code it? Use a data table?
+  
+  # Target methods that take 5 seconds or less. 
+    # First work on summaries that work on the whole data set really quick (either using data tables or not). Look into using parallel apply, etc.
+    # Second work on summaries that need to take a sample of the data (such as sample)
+
+    # Documentation on sampling
+      # https://rdrr.io/cran/dplyr/man/sample.html
+      # https://stackoverflow.com/questions/21255366/sample-rows-of-subgroups-from-dataframe-with-dplyr
 
 
 # Parallel Notes Section --------------------------------------------------------
