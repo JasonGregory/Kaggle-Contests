@@ -26,17 +26,16 @@
 
 # Load libraries ----------------------------------------------------------
 library(tidyverse)
-library(dplyr)
+#library(dplyr)
+#library(tibble)
+#library(readr)
 library(moments)
 # library(dataFun)
 library(stringr)
 library(forcats)
 library(vtreat)
-library(lubridate)
-library(gridExtra)
 options(max.print=999999)
 options(scipen=999)
-
 
 # Additional to-do Items --------------------------------------------------
   # The inital prep state would show plots for outliers, the variable being predicted, describe tables
@@ -53,25 +52,25 @@ write_rds(propertyData, normalizePath("data/zillow/propertyData.rds"))
 write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
 
 # Read in data ------------------------------------------------------------
-(i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
-# (i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
+# (i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
+ (i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
 (train_data <- read_rds(normalizePath("data/zillow/trainData.rds")))
   # (dataDict <- rio::import(normalizePath("data/zillow/zillow_data_dictionary.xlsx")))
 
 # Initial look at files ---------------------------------------------------
-(i_describe <- prep_describe(i_data))
-(t_describe <- prep_describe(train_data))
-i_describe %>% print(n = Inf)
-t_describe %>% print(n = Inf)
+i_describe <- prep_describe(i_data); print(i_describe, n = Inf)
+t_describe <- prep_describe(train_data); print(t_describe, n = Inf)
 
 (var_distinct <- prep_distinct(i_describe))
 prep_distinct(t_describe)
+
+
 
 # Join data -----------------------------------------
 n1_data <- i_data %>%
   inner_join(train_data, by = "parcelid")
 
-(n1_describe <- prep_describe(n1_data))
+n1_describe <- prep_describe(n1_data) ; print(n1_describe, n = Inf)
 
 # Variable Prep -----------------------------------------------------------
 
@@ -88,58 +87,68 @@ var_explanatory <- setdiff(var_explanatory, var_null)
 prep_plot(filter(n1_describe, variable %in% var_explanatory))
 
 # Analyze location variables later 
-var_location <- c("longitude", "latitude", "rawcensustractandblock", "censustractandblock")
+var_location <- c("longitude", "latitude", "rawcensustractandblock", "censustractandblock", "regionidzip", "regionidcity")
 var_explanatory <- setdiff(var_explanatory, var_location)
 prep_plot(filter(n1_describe, variable %in% var_explanatory))
 
+# Replace null values
+n1_data <- n1_data %>% select(c(var_outcome, var_explanatory))
+n2_data <- prep_inpute(n1_data)
+
+n1_describe <- prep_describe(n1_data); print(n1_describe, n = Inf)
+n2_describe <- prep_describe(n2_data); print(n2_describe, n = Inf)
+prep_plot(n1_describe)
+prep_plot(n2_describe, plot_type = "distinct")
+
 # Create factor variables
+n2_describe %>% arrange(desc(dist_count)) %>% print(n = Inf)
 
-  # add the following logic to the function.
-temp <- n1_describe %>% filter(variable %in% var_explanatory) %>% arrange(desc(dist_count)) %>% prep_select(variable)
-  #
-
-prep_table(n1_data %>% select(temp), n_row = 10)
-
-prep_table(n1_data, vars = "taxamount")
+  # leave as is for now
+  # var_factor <- n2_describe %>% arrange(desc(dist_count))
+  # n2_data <- n2_data %>% mutate_at(var_factor, as.factor)
 
 
-n1_describe %>% 
-  select(variable, dist_perc, everything()) %>%
-  filter(variable %in% var_explanatory) %>%
-  arrange(desc(dist_perc)) %>%
-  print(n = Inf)
-
-## insert table function
-
-var_factors <- n1_describe %>% 
-  filter(variable %in% var_explanatory, dist_count < 40) %>% 
-  prep_select(variable)
-
-
-variable_factors <- c(variable_factors, "regionidcity", "propertycountylandusecode", "regionidzip")
-
-(c_data <- i_data %>% select(one_of(variables_explanatory)) %>% mutate_at(variable_factors, as.factor))
-
-# Replace factor variable null values (don't always need to run this section)
-c_data[variable_factors] <- prep_replaceNull(c_data, variable_factors)
-prep_describe(c_data)
+# Analyze outcome variable ------------------------------------------------
 
 
 # Index plot of logerrors (good for looking for outliers)
 # Add descriptions of outlier/no-outlier
-plot1 <- train_data %>%
+
+
+
+
+data %>%
+  mutate(index = row_number(data %>% prep_select(var_outcome))) %>%
+  select(index)
+
+
+plot1 <- data %>%
+  mutate(index = row_number(data %>% prep_select(var_outcome))) %>%
+  ggplot(aes_string(x = "index", y = var_outcome)) +
+  geom_point(alpha = 1/12) +
+  labs(title = "With outliers")
+
+
+
+outcome <- data %>% prep_select(var_outcome)
+
+row_number(outcome)
+
+plot1 <- data %>%
   mutate(index = row_number(logerror)) %>%
   ggplot(aes(x = index, y = logerror)) +
   geom_point(alpha = 1/12) +
   labs(title = "With outliers")
 
-plot2 <- prep_outlier(train_data) %>%
+plot2 <- prep_outlier(data) %>%
   mutate(index = row_number(logerror)) %>%
   ggplot(aes(x = index, y = logerror)) +
   geom_point(alpha = 1/12) +
   labs(title = "Without outliers")
 
-grid.arrange(plot1, plot2, ncol=2)
+gridExtra::grid.arrange(plot1, plot2, ncol=2)
+
+
 
 # Histogram of logerror
 # Add descriptions of skew, outlier/no-outlier
@@ -156,7 +165,7 @@ plot2 <- prep_outlier(temp_data) %>%
   labs(title = "Without outliers") #+ 
 #annotate("text", x=max(temp_data$logerror)*.8, y=0, label = "Test", parse=T)  
 
-grid.arrange(plot1, plot2, ncol=2)
+gridExtra::grid.arrange(plot1, plot2, ncol=2)
 
 # Annotation logic. Work on later.
 
@@ -191,7 +200,7 @@ plot3 <- train_data %>%
   geom_bar() +
   labs(title = "By Year")  
 
-grid.arrange(plot1, plot2, plot3, nrow=3)
+gridExtra::grid.arrange(plot1, plot2, plot3, nrow=3)
 
 
 
@@ -226,18 +235,6 @@ prep_distinct <- function(data) {
   }
 }
 
-prep_replaceNull <- function (dta, columns, null_value = "Missing") {
-  dta[columns] <-
-    lapply(dta[columns], function(xx){
-      if (sum(I(is.na(xx))) > 0) {
-        levels(xx) <- c(levels(xx), null_value)
-        xx[is.na(xx)] <- null_value
-      }
-      xx
-    }
-    )
-  dta[columns]
-}
 
 prep_outlier <- function(data, floor = .01, roof = .99) {
   no_outlier <- data %>%
@@ -255,7 +252,7 @@ prep_select <- function(data, column, list_name = FALSE) {
 }
 
 prep_describe <- function(data) {
-
+  
   summaryFnsNum = list(
     median = function(x) median(x, na.rm = TRUE),
     kurtosis = function(x) kurtosis(x, na.rm = TRUE),
@@ -275,24 +272,38 @@ prep_describe <- function(data) {
   summaryFnsClass = list(
     class = class
   )
-
+  
   class_data <- as.data.frame(sapply(summaryFnsClass, function(fn){data %>% summarise_all(fn)}))
   class_data <- class_data %>%
     rownames_to_column(var = "variable") %>%
     unnest()
   
-  data <- data %>% 
-    mutate_if(is.Date, function(x) as.numeric(format(x, "%Y%m%d")))  
-
+  if (select_if(data, lubridate::is.Date) %>% ncol > 0) {
+    data <- data %>% 
+      mutate_if(lubridate::is.Date, function(x) as.numeric(format(x, format = "%Y%m%d")))    
+  }
+  
   numeric_data <- as.data.frame(sapply(summaryFnsNum, function(fn){data %>% select_if(is.numeric) %>% summarise_all(fn)}))
-  numeric_data <- numeric_data %>%
-    rownames_to_column(var = "variable") %>%
-    unnest()
+  if (ncol(numeric_data) == 0) {
+    numeric_data <- tibble(
+      variable = "none"
+    )
+  } else {
+    numeric_data <- numeric_data %>%
+      rownames_to_column(var = "variable") %>%
+      unnest()
+  }
   
   all_data <- as.data.frame(sapply(summaryFnsAll, function(fn){data %>% summarise_all(fn)}))
-  all_data <- all_data %>%
-    rownames_to_column(var = "variable") %>%
-    unnest()
+  if (ncol(all_data) == 0) {
+    all_data <- tibble(
+      variable = "none"
+    )
+  } else {
+    all_data <- all_data %>%
+      rownames_to_column(var = "variable") %>%
+      unnest()
+  }
   
   describe <- all_data %>%
     left_join(numeric_data, by = "variable") %>%
@@ -305,35 +316,54 @@ prep_describe <- function(data) {
     select(variable, class, total_count, dist_count, null_count, null_perc, dist_perc, everything())
   
   return(describe)
-
+  
 }
 
-prep_table <- function(data, n_dist = 80, vars = NULL, n_row = 15) { # Bring in describe table to make quicker
-  
-  data <- if (is.null(vars)) data else select(data, vars)
+prep_table <- function(data, n_dist = 80, n_row = 15, vars = NULL, describe = NULL) {
+  if (!is.null(describe)) {
+    if (ncol(data) != nrow(describe)) stop("The inputs for data and describe do not have the same number of variables. Either modify or remove the input for describe.")
+  }
+#  if ((ncol(data) != nrow(describe)) & !is.null(describe)) stop("The inputs for data and describe do not have the same number of variables. Either modify or remove the input for describe.")
+
+  if (!is.null(vars)) data <- select(data, vars)
   
   if (n_dist == 80) {
     if (ncol(data)*nrow(data) > 90000000) {
-      ncol1 <- ncol(data)      
-      data <- data %>% 
-        select_if(function(col) n_distinct(col) <= n_dist)
+      ncol1 <- ncol(data)
+      if (!is.null(describe)) {
+        vars_dist <- describe %>% filter(dist_count <= n_dist) %>% arrange(desc(dist_count)) %>% prep_select(variable)
+        data <- select(data, vars_dist)
+      } else {
+        data <- data %>%
+          select_if(function(col) n_distinct(col) <= n_dist)
+      }
       ncol2 <- ncol(data)
       
       if (ncol1 - ncol2 > 0) {
         message_description <- paste(ncol1 - ncol2, "columns filtered. Only columns with <= 80 distinct values included. Use n_dist argument to modify.")
-      } else {     
+      } else {
         message_description <- NULL
       }
     }
     else {
-      message_description <- NULL
+      if (!is.null(describe)) {
+        vars_dist <- describe %>% arrange(desc(dist_count)) %>% prep_select(variable)
+        data <- select(data, vars_dist)
+        message_description <- NULL
+      } else {
+        message_description <- NULL
+      }
     }
   } else {
     ncol1 <- ncol(data)
-    data <- data %>% 
-      select_if(function(col) n_distinct(col) <= n_dist)
+    if (!is.null(describe)) {
+      vars_dist <- describe %>% filter(dist_count <= n_dist) %>% arrange(desc(dist_count)) %>% prep_select(variable)
+      data <- select(data, vars_dist)
+    } else {
+      data <- data %>%
+        select_if(function(col) n_distinct(col) <= n_dist)
+    }
     ncol2 <- ncol(data)
-    
     if (ncol1 - ncol2 == 0) {
       message_description <- paste("All columns have less unique values than", n_dist)
     } else {
@@ -361,26 +391,26 @@ prep_table <- function(data, n_dist = 80, vars = NULL, n_row = 15) { # Bring in 
   }
 }
 
-prep_plot <- function(data, plot_type = "all") {
-  if (colnames(select(data, 1)) == "variable") {
+prep_plot <- function(describe, plot_type = "all") {
+  if (colnames(select(describe, 1)) == "variable") {
     if (plot_type == "all") {
-      plot1 <- data %>%
+      plot1 <- describe %>%
         ggplot(aes(x = reorder(variable, null_perc), y = null_perc)) +
         geom_bar(stat = "identity") + 
         scale_y_continuous(expand = c(0,0)) +
         labs(x = "Variable", y = "Null %") +
         coord_flip()
       
-      plot2 <- data %>%
+      plot2 <- describe %>%
         ggplot(aes(x = reorder(variable, dist_perc), y = dist_perc)) +
         geom_bar(stat = "identity") + 
         scale_y_continuous(expand = c(0,0)) +
         labs(x = "Variable", y = "Distinct %") +
         coord_flip()
       
-      return(grid.arrange(plot1, plot2, ncol=2))
+      return(gridExtra::grid.arrange(plot1, plot2, ncol=2))
     } else if (plot_type == "null") {
-      plot <- data %>%
+      plot <- describe %>%
         ggplot(aes(x = reorder(variable, null_perc), y = null_perc)) +
         geom_bar(stat = "identity") + 
         scale_y_continuous(expand = c(0,0)) +
@@ -389,7 +419,7 @@ prep_plot <- function(data, plot_type = "all") {
       
       return(plot)
     } else if (plot_type == "distinct") {
-      plot <- data %>%
+      plot <- describe %>%
         ggplot(aes(x = reorder(variable, dist_perc), y = dist_perc)) +
         geom_bar(stat = "identity") + 
         scale_y_continuous(expand = c(0,0)) +
@@ -403,6 +433,80 @@ prep_plot <- function(data, plot_type = "all") {
   } else {
     NULL #data %>%
   }
+}
+
+prep_inpute <- function(data, vars = NULL, character_value = "missing", numeric_value = "mean", date_value = lubridate::ymd(19000101)) {
+  
+  if (!is.null(vars)) {
+    var_all <- select(data, vars) %>% select_if(function(x) sum(is.na(x)) > 0) %>% colnames()
+  } else {
+    var_all <- select_if(data, function(x) sum(is.na(x)) > 0) %>% colnames()
+  }
+  var_char <- select(data, one_of(var_all)) %>% select_if(is.character) %>% colnames()
+  var_factor <- select(data, one_of(var_all)) %>% select_if(is.factor) %>% colnames()  
+  var_date <- select(data, one_of(var_all)) %>% select_if(lubridate::is.Date) %>% colnames()
+  var_numeric <- select(data, one_of(var_all)) %>% select_if(is.numeric) %>% colnames()
+  var_other <- setdiff(var_all, c(var_char, var_factor, var_date, var_numeric))
+  
+  treatments <- designTreatmentsZ(data, var_numeric, verbose = FALSE)
+  treated <- as_tibble(prepare(treatments, data))
+  
+  data <- if (length(var_char) > 0) {
+    if (character_value != "max") {
+      data %>% mutate_at(var_char, function(x)  replace(x, is.na(x), character_value))      
+    } else if (character_value == "max") {
+      data %>% mutate_at(var_char, function(x)  replace(x, is.na(x), names(which.max(table(x)))))
+    } else {
+      data    
+    }
+  } else {
+    data
+  }
+  
+  data <- if (length(var_factor) > 0) {
+    if (character_value != "max") {
+      data %>% mutate_at(var_factor, function(x) fct_explicit_na(x, na_level = character_value))
+    } else if (character_value == "max") {
+      data %>% mutate_at(var_factor, function(x) fct_explicit_na(x, na_level = names(which.max(table(x)))))
+    } else {
+      data    
+    }
+  } else {
+    data
+  }
+  
+  data <- if (length(var_date) > 0) {
+    if (as.character(date_value) != "max") {
+      data %>% mutate_at(var_char, function(x)  replace(x, is.na(x), date_value))      
+    } else if (date_value == "max") {
+      data %>% mutate_at(var_char, function(x)  replace(x, is.na(x), lubridate::ymd(names(which.max(table(date))))))
+    } else {
+      data    
+    }
+  } else {
+    data
+  }
+  
+  data <- if (length(var_numeric) > 0) {
+    if (numeric_value != "mean") {
+      data %>% mutate_at(var_numeric, function(x)  replace(x,is.na(x), numeric_value))
+    } else if (numeric_value == "mean") {
+      data %>% mutate_at(var_numeric, function(x) replace(x, is.na(x), mean(x, na.rm = TRUE)))
+    } else {
+      data    
+    }
+  } else {
+    data
+  }
+  
+  data <- if (length(var_other) > 0) {
+    data %>% mutate_at(var_other, function(x)  replace(x, is.na(x), names(which.max(table(x)))))
+  } else {
+    data
+  } 
+  
+  data <- as_tibble(cbind(data, select(treated, contains("isBad"))))
+  data %>% select(1, order(colnames(data)))
 }
 
 dataFun_instructions <- function() { # This would provide instructions on how to use the package.
