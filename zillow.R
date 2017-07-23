@@ -34,6 +34,7 @@ library(moments)
 library(stringr)
 library(forcats)
 library(vtreat)
+library(rlang)
 options(max.print=999999)
 options(scipen=999)
 
@@ -52,8 +53,8 @@ write_rds(propertyData, normalizePath("data/zillow/propertyData.rds"))
 write_rds(trainData, normalizePath("data/zillow/trainData.rds"))
 
 # Read in data ------------------------------------------------------------
-# (i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
- (i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
+ (i_data <- read_rds(normalizePath("data/zillow/propertyData.rds")))
+# (i_data <- read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
 (train_data <- read_rds(normalizePath("data/zillow/trainData.rds")))
   # (dataDict <- rio::import(normalizePath("data/zillow/zillow_data_dictionary.xlsx")))
 
@@ -110,62 +111,139 @@ n2_describe %>% arrange(desc(dist_count)) %>% print(n = Inf)
 
 # Analyze outcome variable ------------------------------------------------
 
-
 # Index plot of logerrors (good for looking for outliers)
-# Add descriptions of outlier/no-outlier
+
+expl_response(n2_data, var_outcome)
+
+expl_response <- function(data, var_outcome) { # Eventually replace the outlier option with the ggvis interactive option
+
+  plot1 <- data %>%
+    mutate(index = row_number(prep_select(data, var_outcome))) %>% # probably create index before the plot function
+    ggplot(aes_string(x = "index", y = var_outcome)) +
+    geom_point(alpha = 1/12) +
+    labs(title = "With outliers")
+  
+  plot2 <- prep_outlier(data) %>%
+    mutate(index = row_number(prep_select(prep_outlier(data), var_outcome))) %>% # once again probably do data prep before this part
+    ggplot(aes_string(x = "index", y = var_outcome)) +
+    geom_point(alpha = 1/12) +
+    labs(title = "Without outliers")
+  
+  gridExtra::grid.arrange(plot1, plot2, ncol=2)
+
+}
+
+# histogram plot
+  # possibly put a splin on the histogram plot by creating additional frames based on the response variable
+
+var_test <- "bathroomcnt"
+
+expl_histogram(n2_data, var_test)
+
+expl_histogram <- function(data, var_outcome) {
+  plot1 <- data %>%
+    ggplot(aes_string(x = var_outcome)) +
+    geom_histogram(bins = nrow(data)^(1/3)) +
+    labs(title = "With outliers") 
+  
+  plot2 <- prep_outlier(data) %>%
+    ggplot(aes_string(x = var_outcome)) +
+    geom_histogram(bins = nrow(prep_outlier(data))^(1/3)) +
+    labs(title = "Without outliers")
+  
+  gridExtra::grid.arrange(plot1, plot2, ncol=2)
+}
 
 
+# Trying to do the histogram plot with multiple variables
 
+var_test <- c("bathroomcnt", "logerror")
 
-data %>%
-  mutate(index = row_number(data %>% prep_select(var_outcome))) %>%
-  select(index)
+expl_histogram2(n2_data, var_test)
 
+expl_histogram2 <- function(data, var_outcome) {
+  
+  for(i in 1:length(var_outcome)) {
+  
+    plot1 <- data %>%
+      ggplot(aes_string(x = var_outcome[i])) +
+      geom_histogram(bins = nrow(data)^(1/3)) +
+      labs(title = "With outliers")
+    
+#    print(plot1)
+    
+    plot2 <- prep_outlier(data) %>%
+      ggplot(aes_string(x = var_outcome[i])) +
+      geom_histogram(bins = nrow(prep_outlier(data))^(1/3)) +
+      labs(title = "Without outliers")
+    
+    gridExtra::grid.arrange(plot1, plot2, ncol=2)
+  
+  }
+}
 
-plot1 <- data %>%
-  mutate(index = row_number(data %>% prep_select(var_outcome))) %>%
-  ggplot(aes_string(x = "index", y = var_outcome)) +
-  geom_point(alpha = 1/12) +
+# General multi plot function that is more flexible
+data <- n2_data
+
+vars <- data %>% select_if(is.numeric) %>% select(1:5) %>% colnames()
+
+p1 <- data %>%
+  ggplot(aes(x = logerror)) +
+  geom_histogram(bins = nrow(data)^(1/3)) +
   labs(title = "With outliers")
 
-
-
-outcome <- data %>% prep_select(var_outcome)
-
-row_number(outcome)
-
-plot1 <- data %>%
-  mutate(index = row_number(logerror)) %>%
-  ggplot(aes(x = index, y = logerror)) +
-  geom_point(alpha = 1/12) +
-  labs(title = "With outliers")
-
-plot2 <- prep_outlier(data) %>%
-  mutate(index = row_number(logerror)) %>%
-  ggplot(aes(x = index, y = logerror)) +
-  geom_point(alpha = 1/12) +
+p2 <- prep_outlier(data) %>%   # need to think about how to fix for outliers. Need variable to iterate. Maybe just make the second plot with no outliers.
+  ggplot(aes(x = logerror)) +
+  geom_histogram(bins = nrow(prep_outlier(data))^(1/3)) +
   labs(title = "Without outliers")
 
-gridExtra::grid.arrange(plot1, plot2, ncol=2)
+# index plots
+
+data <- n2_data %>% 
+  select_if(is.numeric) %>% 
+  select(1, 3:5) %>%
+  prep_rankColumn
+
+x_vars <- data %>% select(contains("index")) %>% colnames()
+y_vars <- setdiff(colnames(data), x_vars)
+
+p3 <- data %>%
+  ggplot(aes_string(x = x_vars[1], y = y_vars[1])) +
+  geom_point(alpha = 1/12) +
+  labs(title = "With outliers")
+
+p4 <- prep_outlier(data, y_vars[2]) %>%
+  ggplot(aes_string(x = x_vars[1], y = y_vars[1])) +
+  geom_point(alpha = 1/12) +
+  labs(title = "Without outliers")
+  
+explore_plot(plot1 = p1, x_vars = vars, plot2 = p2)
+
+explore_plot(plot1 = p3, x_vars = x_vars, y_vars = y_vars, plot2 = p4)
+
+RShowDoc('WVPlots_examples',package='WVPlots')
+
+WVPlots::ScatterHist(prep_outlier(data, "logerror"), "taxamount", "logerror", smoothmethod="lm", "Linear fit")
+WVPlots::ScatterHist(prep_outlier(data, "logerror"), "taxamount", "logerror", smoothmethod="identity", "Relation Plot")
 
 
+data <- data %>% mutate(bathroomcnt = as.factor(bathroomcnt),
+                bedroomcnt = as.factor(bedroomcnt)
+)
 
-# Histogram of logerror
-# Add descriptions of skew, outlier/no-outlier
-plot1 <- train_data %>%
-  ggplot(aes(x = logerror)) +
-  geom_histogram(bins = nrow(train_data)^(1/3)) +
-  labs(title = "With outliers") #+ 
-#annotate("text", x=max(train_data$logerror)*.8, y=0, label = "Test", parse=T)  
+p5 <- WVPlots::ScatterBoxPlot(data, "bathroomcnt", "logerror", pt_alpha=0.2, title="Scatter/Box plot")
 
-temp_data <- prep_outlier(train_data)
-plot2 <- prep_outlier(temp_data) %>%
-  ggplot(aes(x = logerror)) +
-  geom_histogram(bins = nrow(temp_data)^(1/3)) +
-  labs(title = "Without outliers") #+ 
-#annotate("text", x=max(temp_data$logerror)*.8, y=0, label = "Test", parse=T)  
+p5 + aes(x = bedroomcnt)
 
-gridExtra::grid.arrange(plot1, plot2, ncol=2)
+# Other plotting stuff
+ # "%+%" overrides the data for gggplot
+ # ggplot_build(plot2) looks at underlying data
+ # q <- ggplot_build(plot2)
+ # q$data[[1]]$colour <- "black" # change to different color
+ # q <- ggplot_gtable(q) build the table
+ # in ggvis use something like get_data
+ # Use class(plot1)[1] to determine the type of plot being used 
+ # pltList <- list() Create a list of plots to reference later  
 
 # Annotation logic. Work on later.
 
@@ -235,11 +313,11 @@ prep_distinct <- function(data) {
   }
 }
 
-
-prep_outlier <- function(data, floor = .01, roof = .99) {
+prep_outlier <- function(data, var, floor = .01, roof = .99) {
+  q_high <- quantile(data %>% prep_select(var), roof)
+  q_low <- quantile(data %>% prep_select(var), floor)
   no_outlier <- data %>%
-    filter(logerror <= quantile(logerror, roof), logerror >= quantile(logerror, floor)) 
-  
+    filter(UQ(sym(var)) <= q_high, UQ(sym(var)) >= q_low)     
   return(no_outlier)
 }
 
@@ -508,6 +586,64 @@ prep_inpute <- function(data, vars = NULL, character_value = "missing", numeric_
   data <- as_tibble(cbind(data, select(treated, contains("isBad"))))
   data %>% select(1, order(colnames(data)))
 }
+
+prep_rankColumn <- function(data, cols = NULL) {
+  if (is.null(cols)) {
+    cols <- colnames(data)
+  }
+  for (i in 1:length(cols)) {
+    data <- data %>%
+      mutate(!!paste(cols[i], "_index", sep="") := row_number(data %>% prep_select(cols[i])))
+  }
+  return(data)
+}
+
+explore_plot <- function(plot1, x_vars = NULL, y_vars = NULL, plot2 = NULL) { # Think about changing data for plot 2
+  if (class(plot1)[1] == "gg" | class(plot1)[1] == "gtable") {
+    if (sum(is.null(x_vars), is.null(y_vars)) == 2) {
+      p1 <- plot1
+      if (is.null(plot2)) {
+        print(p1)
+      } else {
+        p2 <- plot2
+        gridExtra::grid.arrange(p1, p2, ncol=2)
+      } 
+    } else if (is.null(x_vars)) {
+      for(i in 1:length(y_vars)) {
+        p1 <- plot1 + aes_string(y = y_vars[i])
+        if (is.null(plot2)) {
+          print(p1)
+        } else {
+          p2 <- plot2 + aes_string(y = y_vars[i])
+          gridExtra::grid.arrange(p1, p2, ncol=2)          
+        }
+      }
+    } else if (is.null(y_vars)) {
+      for(i in 1:length(x_vars)) {
+        p1 <- plot1 + aes_string(x = x_vars[i])
+        if (is.null(plot2)) {
+          print(p1)
+        } else {
+          p2 <- plot2 + aes_string(x = x_vars[i])
+          gridExtra::grid.arrange(p1, p2, ncol=2)          
+        }
+      }      
+    } else {
+      for(i in 1:length(x_vars)) {
+        p1 <- plot1 + aes_string(x = x_vars[i], y = y_vars[i])
+        if (is.null(plot2)) {
+          print(p1)
+        } else {
+          p2 <- plot2 + aes_string(x = x_vars[i], y = y_vars[i])
+          gridExtra::grid.arrange(p1, p2, ncol=2)          
+        }
+      }        
+    }
+  } else {
+    print("ggvis not supported at this point")
+  }
+}
+
 
 dataFun_instructions <- function() { # This would provide instructions on how to use the package.
   
