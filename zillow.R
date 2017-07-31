@@ -25,6 +25,8 @@
   # Predict logerror for the months in Fall 2017
 
 # Load libraries ----------------------------------------------------------
+library(plyr)
+#library(psych)
 library(tidyverse)
 #library(dplyr)
 #library(tibble)
@@ -35,6 +37,7 @@ library(stringr)
 library(forcats)
 library(vtreat)
 library(rlang)
+library(broom)
 options(max.print=999999)
 options(scipen=999)
 
@@ -111,76 +114,178 @@ n2_describe %>% arrange(desc(dist_count)) %>% print(n = Inf)
 
 # Analyze outcome variable ------------------------------------------------
 
-# Index plot of logerrors (good for looking for outliers)
+# Outcome response table
 
-expl_response(n2_data, var_outcome)
+temp <- n2_data %>% select(logerror, bathroomcnt, bedroomcnt, finishedsquarefeet12)
 
-expl_response <- function(data, var_outcome) { # Eventually replace the outlier option with the ggvis interactive option
+temp <- n2_data %>% select(-fips, -propertycountylandusecode, -transactiondate)
 
-  plot1 <- data %>%
-    mutate(index = row_number(prep_select(data, var_outcome))) %>% # probably create index before the plot function
-    ggplot(aes_string(x = "index", y = var_outcome)) +
-    geom_point(alpha = 1/12) +
-    labs(title = "With outliers")
+
+#### Pulling in correlation for all variables
+treatment <- designTreatmentsZ(test, colnames(test), verbose = FALSE)
+treated <- as_tibble(prepare(treatment, test))
+treated <- select(treated, -contains("catP"))
+treated_describe <- prep_describe(treated) #Need to add to the describe function some additional fields from the vtreat summary (like orignal name).
+treated_describe <- treated_describe %>%
+  left_join(treatment$scoreFrame, c("variable" = "varName")) %>%
+  select(variable, origName, code, class, total_count, dist_count, dist_perc, null_count, mean)
+treated_describe %>% print(n = Inf)
+# rsq & sig are important when not doing the TreatmentsZ but another one.
+
+library(Hmisc)
+correlations <- rcorr(as.matrix(treated))
+testCor <- as.tibble(as.data.frame(correlations$r))
+
+corTable <- testCor %>%
+  rownames_to_column(var = "variable") %>%
+  gather(-variable, key = "comparison_variable", value = "correlation") %>%
+  select(variable, comparison_variable, correlation, everything()) %>% 
+  arrange(variable, desc(abs(correlation))) %>%
+  filter(variable != comparison_variable)
+
+corTable <- corTable %>% 
+  group_by(variable) %>%
+  mutate(avg_corr = mean(correlation),
+         max_corr = max(abs(correlation)),
+         rank_corr = row_number(desc(abs(correlation)))) %>%
+  ungroup()
+
+corTable %>% 
+  filter(max_corr == correlation)
+
+# use this then to join on the other exploratory table analysis. Possilbe to pull the top 2 correlated variables if desired.
+
+####
+
+explore_describe(n2_data, var_outcome) %>% print(n = Inf)
+
+explore_describe <- function(data, var_outcome) {
+  num_data <- select_if(data, is.numeric)
   
-  plot2 <- prep_outlier(data) %>%
-    mutate(index = row_number(prep_select(prep_outlier(data), var_outcome))) %>% # once again probably do data prep before this part
-    ggplot(aes_string(x = "index", y = var_outcome)) +
-    geom_point(alpha = 1/12) +
-    labs(title = "Without outliers")
+  summaryFns = list(
+    spearman = function(x) cor(x, select(n2_data, var_outcome), method = "spearman"),
+    pearson = function(x) cor(x, select(n2_data, var_outcome), method = "pearson"),
+    r_squared = function(x) cor(x, select(n2_data, var_outcome), method = "pearson")^2
+    # Pearson correlation evaluated the linear relationship. Spearman evaluates monotonic relationship (change together but not at the same rate).
+    # Spearman is looking at one type of non-linear relationship.
+  )
   
-  gridExtra::grid.arrange(plot1, plot2, ncol=2)
-
-}
-
-# histogram plot
-  # possibly put a splin on the histogram plot by creating additional frames based on the response variable
-
-var_test <- "bathroomcnt"
-
-expl_histogram(n2_data, var_test)
-
-expl_histogram <- function(data, var_outcome) {
-  plot1 <- data %>%
-    ggplot(aes_string(x = var_outcome)) +
-    geom_histogram(bins = nrow(data)^(1/3)) +
-    labs(title = "With outliers") 
-  
-  plot2 <- prep_outlier(data) %>%
-    ggplot(aes_string(x = var_outcome)) +
-    geom_histogram(bins = nrow(prep_outlier(data))^(1/3)) +
-    labs(title = "Without outliers")
-  
-  gridExtra::grid.arrange(plot1, plot2, ncol=2)
-}
-
-
-# Trying to do the histogram plot with multiple variables
-
-var_test <- c("bathroomcnt", "logerror")
-
-expl_histogram2(n2_data, var_test)
-
-expl_histogram2 <- function(data, var_outcome) {
-  
-  for(i in 1:length(var_outcome)) {
-  
-    plot1 <- data %>%
-      ggplot(aes_string(x = var_outcome[i])) +
-      geom_histogram(bins = nrow(data)^(1/3)) +
-      labs(title = "With outliers")
-    
-#    print(plot1)
-    
-    plot2 <- prep_outlier(data) %>%
-      ggplot(aes_string(x = var_outcome[i])) +
-      geom_histogram(bins = nrow(prep_outlier(data))^(1/3)) +
-      labs(title = "Without outliers")
-    
-    gridExtra::grid.arrange(plot1, plot2, ncol=2)
-  
+  summary_data <- as.data.frame(sapply(summaryFns, function(fn){num_data %>% summarise_all(fn)}))
+  if (ncol(summary_data) == 0) {
+    summary_data <- tibble(
+      variable = "none"
+    )
+  } else {
+    summary_data <- summary_data %>%
+      rownames_to_column(var = "variable") %>%
+      unnest()
   }
+  
+  lm <- tidy(lm(paste(var_outcome, "~ ."), data = data))
+  
+  describe <- summary_data %>%
+    full_join(lm, by = c("variable" = "term")) %>%
+    dplyr::rename(linear_std.error = std.error, linear_p.value = p.value) %>%
+    select(variable, spearman, pearson, r_squared, linear_p.value) %>% 
+    filter(variable != "(Intercept)") %>%
+    as.tibble
+
+  return(describe)
 }
+
+
+# Retrieving linear model stuff
+
+# Predicted r-squared
+pred_r_squared <- function(linear.model) {
+  lm.anova <- anova(linear.model)
+  tss <- sum(lm.anova$"Sum Sq")
+  # predictive R^2
+  pred.r.squared <- 1 - PRESS(linear.model)/(tss)
+  return(pred.r.squared)
+}
+
+PRESS <- function(linear.model) {
+  pr <- residuals(linear.model)/(1 - lm.influence(linear.model)$hat)
+  PRESS <- sum(pr^2)
+  return(PRESS)
+}
+  
+pred.r.squared <- pred_r_squared(my.lm)
+pred.r.squared
+
+?ldply
+
+
+# Example
+# Set up some data
+x <- seq(from=0, to=10, by=0.5)
+y1 <- 2*x + rnorm(length(x))
+
+
+# We want to compare two different linear models:
+my.lm1 <- lm(y1 ~ sin(x))
+my.lm2 <- lm(y1 ~ x)
+
+# We will use plyr for this.
+library(plyr)
+
+# Now call model_fit_stats() for each lm model that
+# we have, using ldply. This returns the results in
+# a data frame that is easily used for further 
+# calculations.
+ldply(list(my.lm1, my.lm2), model_fit_stats)
+
+model_fit_stats <- function(linear.model) {
+  r.sqr <- summary(linear.model)$r.squared
+  adj.r.sqr <- summary(linear.model)$adj.r.squared
+  pre.r.sqr <- pred_r_squared(linear.model)
+  PRESS <- PRESS(linear.model)
+  return.df <- data.frame(r.squared = r.sqr, adj.r.squared = adj.r.sqr, pred.r.squared = pre.r.sqr, press = PRESS)
+  return(return.df)
+}
+pred_r_squared <- function(linear.model) {
+  #' Use anova() to get the sum of squares for the linear model
+  lm.anova <- anova(linear.model)
+  #' Calculate the total sum of squares
+  tss <- sum(lm.anova$'Sum Sq')
+  # Calculate the predictive R^2
+  pred.r.squared <- 1-PRESS(linear.model)/(tss)
+  
+  return(pred.r.squared)
+}
+PRESS <- function(linear.model) {
+  #' calculate the predictive residuals
+  pr <- residuals(linear.model)/(1-lm.influence(linear.model)$hat)
+  #' calculate the PRESS
+  PRESS <- sum(pr^2)
+  
+  return(PRESS)
+}
+
+
+# Misc trial stuff
+summary(m1)
+
+summary(lm(paste(var_outcome, "~", colnames(temp)[2]), data = temp))$r.squared
+
+temp %>% summarise_all(function(x) summary(lm(paste(var_outcome, "~", colnames(temp)[x]), data = temp))$r.squared)
+
+temp %>% colnames()
+
+
+sapply(cor(x, select(n2_data, var_outcome)), function(fn){temp %>% summarise_all(fn)})
+
+
+all_data
+
+
+m1 <- lm(logerror~bathroomcnt, data = temp)
+summary(m1)$r.squared
+
+
+
+
 
 # General multi plot function that is more flexible
 data <- n2_data
@@ -231,7 +336,7 @@ data <- data %>% mutate(bathroomcnt = as.factor(bathroomcnt),
                 bedroomcnt = as.factor(bedroomcnt)
 )
 
-p5 <- WVPlots::ScatterBoxPlot(data, "bathroomcnt", "logerror", pt_alpha=0.2, title="Scatter/Box plot")
+p5 <- WVPlots::ScatterBoxPlot(data, "bathroomcnt", "logerror", pt_alpha=0.002, title="Scatter/Box plot")
 
 p5 + aes(x = bedroomcnt)
 
