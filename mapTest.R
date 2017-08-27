@@ -111,7 +111,7 @@ f4 <- function(data, type = "basic") {
   return(describe)
 }
 
-# Adds in table logic for the advanced pull. Need to figure out how to add a name attribute for each list.
+# Adds in table logic for the advanced pull. Need to figure out how to add a name attribute for each list. Also possibly add a third column for rank.
 f5 <- function(data, type = "basic") {
   if (type == "basic") {
     describe <- tibble::tibble(
@@ -160,7 +160,7 @@ f5 <- function(data, type = "basic") {
   return(describe)
 }
 
-# same as f5 except that it excludes unique columns. Not sure if this is better since it doesn't finish quicker.
+# Adds a top column (possibly add a top_1 and top_2 columns)
 f6 <- function(data, type = "basic") {
   if (type == "basic") {
     describe <- tibble::tibble(
@@ -176,25 +176,19 @@ f6 <- function(data, type = "basic") {
     ) %>%
       select(variable, class, null_perc, distinct_perc, null_count, distinct_count, total_count)
   } else {
-
+    
+    numeric <- select_if(data, is.numeric)
+    
     describe1 <- tibble::tibble(
       variable = names(data),
       class = purrr::map_chr(data, ~class(.x)),
       null_count = purrr::map_dbl(data, ~sum(is.na(.x))),
       distinct_count = purrr::map_dbl(data, ~data.table::uniqueN(.x)),
-      total_count = purrr::map_dbl(data, ~length(.x))
+      total_count = purrr::map_dbl(data, ~length(.x)),
+      table = purrr::map(data, ~data.table::data.table(.x)[, .N, keyby = .x] %>% as_tibble %>% rename(count = N, value = .x) %>% arrange(desc(count)))
     ) 
     
-    non_unique <- describe1 %>% filter(distinct_count/total_count != 1) %>% select(variable) %>% unlist
-    
     describe2 <- tibble::tibble(
-      variable = non_unique,
-      table = purrr::map(select(data, non_unique), ~data.table::data.table(.x)[, .N, keyby = .x] %>% as_tibble %>% rename(count = N, value = .x) %>% arrange(desc(count)))
-    )
-
-    numeric <- select_if(data, is.numeric)
-        
-    describe3 <- tibble::tibble(
       variable = names(numeric),
       max = purrr::map_dbl(numeric, ~max(.x, na.rm = TRUE)),
       min = purrr::map_dbl(numeric, ~min(.x, na.rm = TRUE)),
@@ -207,17 +201,21 @@ f6 <- function(data, type = "basic") {
     
     describe <- describe1 %>%
       left_join(describe2, by = "variable") %>%
-      left_join(describe3, by = "variable") %>%
       mutate(null_perc = round(null_count/total_count, 6),
-             distinct_perc = round(distinct_count/total_count, 6)) %>%
+             distinct_perc = round(distinct_count/total_count, 6),
+             top_value = purrr::map_chr(table, ~data.table::first(.x) %$% value)
+             ) %>%
       #  select(variable, class, null_perc, distinct_perc, max, min, mean, median, skew, standard_deviation, kurtosis, null_count, distinct_count, total_count)
-      select(variable, class, null_perc, distinct_perc, table, max, min, mean, median, standard_deviation, null_count, distinct_count, total_count)  
+      select(variable, class, null_perc, distinct_perc, table, top_value, max, min, mean, median, standard_deviation, null_count, distinct_count, total_count)  
   }
   return(describe)
 }
 
 #Messing around with the table list column
 describe <- f6(i_data, type = "advanced")
+
+describe %>% filter(null_perc < .5) %>% select(variable, class, null_perc, distinct_perc, table, top_value, distinct_count) %>% print(n = Inf)
+select(describe, table) %>% print(n = Inf) %>% tidyr::unnest() # doesn't work.
 
 library(magrittr)
 describe %>% filter(null_perc < .1) %$% table
@@ -257,8 +255,10 @@ summaryRprof(tmp)
 
 #find most frequent value (this isn't what I want!)
 # base it on the list column. Just grab the 1st.
-
+library(magrittr)
 purrr::map(describe$table, ~data.table::first(.x))
+
+purrr::map_chr(describe$table, ~data.table::first(.x) %$% value)
 
 map(i_data, ~which.max(.x))
 x <- c(1:4, 0:5, 11)
