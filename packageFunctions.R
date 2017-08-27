@@ -1,22 +1,22 @@
 # packages ----------------------------------------------------------------
-library(plyr)
-library(Hmisc)
-library(xgboost)
-#library(psych)
-library(tidyverse)
-#library(dplyr)
-#library(tibble)
-#library(readr)
-library(moments)
-# library(dataFun)
-library(stringr)
-library(forcats)
-library(vtreat)
-library(rlang)
-library(broom)
+library(dplyr)
 options(max.print=999999)
 options(scipen=999)
 
+# library(plyr)
+# library(Hmisc)
+# library(xgboost)
+# #library(psych)
+# #library(dplyr)
+# #library(tibble)
+# #library(readr)
+# library(moments)
+# # library(dataFun)
+# library(stringr)
+# library(forcats)
+# library(vtreat)
+# library(rlang)
+# library(broom)
 
 
 # Functions ---------------------------------------------------------------
@@ -60,15 +60,15 @@ prep_describe <- function(data) {
   
   summaryFnsNum = list(
     median = function(x) median(x, na.rm = TRUE),
-    kurtosis = function(x) kurtosis(x, na.rm = TRUE),
-    skew = function(x) skewness(x, na.rm = TRUE),
+    kurtosis = function(x) moments::kurtosis(x, na.rm = TRUE),
+    skew = function(x) moments::skewness(x, na.rm = TRUE),
     max = function(x) max(x, na.rm = TRUE),
     min = function(x) min(x, na.rm = TRUE)
   )
   
   summaryFnsAll = list(
     total_count = function(x) length(x),
-    dist_count = n_distinct,
+    dist_count = function(x) length(unique(x)),
     null_count = function(x) sum(is.na(x)),
     mean  = function(x) mean(x, na.rm = TRUE),
     standard_deviation = function(x) sd(x, na.rm = TRUE)
@@ -80,8 +80,8 @@ prep_describe <- function(data) {
   
   class_data <- as.data.frame(sapply(summaryFnsClass, function(fn){data %>% summarise_all(fn)}))
   class_data <- class_data %>%
-    rownames_to_column(var = "variable") %>%
-    unnest()
+    tibble::rownames_to_column(var = "variable") %>%
+    tidyr::unnest()
   
   if (select_if(data, lubridate::is.Date) %>% ncol > 0) {
     data <- data %>% 
@@ -95,8 +95,8 @@ prep_describe <- function(data) {
     )
   } else {
     numeric_data <- numeric_data %>%
-      rownames_to_column(var = "variable") %>%
-      unnest()
+      tibble::rownames_to_column(var = "variable") %>%
+      tidyr::unnest()
   }
   
   all_data <- as.data.frame(sapply(summaryFnsAll, function(fn){data %>% summarise_all(fn)}))
@@ -106,8 +106,8 @@ prep_describe <- function(data) {
     )
   } else {
     all_data <- all_data %>%
-      rownames_to_column(var = "variable") %>%
-      unnest()
+      tibble::rownames_to_column(var = "variable") %>%
+      tidyr::unnest()
   }
   
   describe <- all_data %>%
@@ -402,8 +402,8 @@ explore_importance <- function(data, var_outcome) {
     )
   } else {
     summary_data <- summary_data %>%
-      rownames_to_column(var = "variable") %>%
-      unnest()
+      tibble::rownames_to_column(var = "variable") %>%
+      tidyr::unnest()
   }
   
   lm <- tidy(lm(paste(var_outcome, "~ ."), data = treated))
