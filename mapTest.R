@@ -1,5 +1,14 @@
-i_data <- readr::read_rds(normalizePath("data/zillow/propertyData.rds"))
+# i_data <- readr::read_rds(normalizePath("data/zillow/propertyData.rds"))
+(i_data <- readr::read_rds("C:/Users/jgregor1/Desktop/propertyData.rds"))
 library(dplyr)
+library(magrittr)
+library(rlang)
+
+# Function to select data frame lists
+lselect <- function(lst) {
+  tibble::enframe(lst) %>% tidyr::unnest()
+}
+
 
 f1 <- function(data) {
   f = list(
@@ -111,7 +120,7 @@ f4 <- function(data, type = "basic") {
   return(describe)
 }
 
-# Adds in table logic for the advanced pull. Need to figure out how to add a name attribute for each list. Also possibly add a third column for rank.
+# Adds in table logic for the advanced pull.
 f5 <- function(data, type = "basic") {
   if (type == "basic") {
     describe <- tibble::tibble(
@@ -136,7 +145,11 @@ f5 <- function(data, type = "basic") {
       null_count = purrr::map_dbl(data, ~sum(is.na(.x))),
       distinct_count = purrr::map_dbl(data, ~data.table::uniqueN(.x)),
       total_count = purrr::map_dbl(data, ~length(.x)),
-      table = purrr::map(data, ~data.table::data.table(.x)[, .N, keyby = .x] %>% as_tibble %>% rename(count = N, value = .x) %>% arrange(desc(count)))
+      table = purrr::map(data, ~data.table::data.table(.x)[, .N, keyby = .x] %>% 
+                           as_tibble %>% 
+                           rename(count = N, value = .x) %>%
+                           mutate(count_rank = min_rank(desc(count))) %>%
+                           arrange(desc(count)))
     ) 
     
     describe2 <- tibble::tibble(
@@ -156,12 +169,70 @@ f5 <- function(data, type = "basic") {
              distinct_perc = round(distinct_count/total_count, 6)) %>%
       #  select(variable, class, null_perc, distinct_perc, max, min, mean, median, skew, standard_deviation, kurtosis, null_count, distinct_count, total_count)
       select(variable, class, null_perc, distinct_perc, table, max, min, mean, median, standard_deviation, null_count, distinct_count, total_count)  
+    
+    names(describe$table) <- describe$variable
   }
   return(describe)
 }
 
-# Adds a top column (possibly add a top_1 and top_2 columns)
+# Converts the table value column to a character value. Takes quite a bit longer though.
 f6 <- function(data, type = "basic") {
+  if (type == "basic") {
+    describe <- tibble::tibble(
+      variable = names(data),
+      class = purrr::map_chr(data, ~class(.x)),
+      null_count = purrr::map_dbl(data, ~sum(is.na(.x))),
+      distinct_count = purrr::map_dbl(data, ~data.table::uniqueN(.x)),
+      total_count = purrr::map_dbl(data, ~length(.x))
+    )    
+    describe <- mutate(describe, 
+                       null_perc = round(null_count/total_count, 6),
+                       distinct_perc = round(distinct_count/total_count, 6)
+    ) %>%
+      select(variable, class, null_perc, distinct_perc, null_count, distinct_count, total_count)
+  } else {
+    
+    numeric <- select_if(data, is.numeric)
+    
+    describe1 <- tibble::tibble(
+      variable = names(data),
+      class = purrr::map_chr(data, ~class(.x)),
+      null_count = purrr::map_dbl(data, ~sum(is.na(.x))),
+      distinct_count = purrr::map_dbl(data, ~data.table::uniqueN(.x)),
+      total_count = purrr::map_dbl(data, ~length(.x)),
+      table = purrr::map(data, ~ data.table::data.table(.x)[, .N, keyby = .x] %>% 
+                           as_tibble %>% 
+                           rename(count = N, value = .x) %>%
+                           mutate(value = as.character(value)) %>%
+                           arrange(desc(count)))
+    ) 
+    
+    describe2 <- tibble::tibble(
+      variable = names(numeric),
+      max = purrr::map_dbl(numeric, ~max(.x, na.rm = TRUE)),
+      min = purrr::map_dbl(numeric, ~min(.x, na.rm = TRUE)),
+      standard_deviation = purrr::map_dbl(numeric, ~sd(.x, na.rm = TRUE)),      
+      mean = purrr::map_dbl(numeric, ~mean(.x, na.rm = TRUE)),
+      median = purrr::map_dbl(numeric, ~median(.x, na.rm = TRUE))#,
+      #      kurtosis = purrr::map_dbl(numeric, ~moments::kurtosis(.x, na.rm = TRUE)),
+      #      skew = purrr::map_dbl(numeric, ~moments::skewness(.x, na.rm = TRUE))       
+    )
+    
+    describe <- describe1 %>%
+      left_join(describe2, by = "variable") %>%
+      mutate(null_perc = round(null_count/total_count, 6),
+             distinct_perc = round(distinct_count/total_count, 6)) %>%
+      #  select(variable, class, null_perc, distinct_perc, max, min, mean, median, skew, standard_deviation, kurtosis, null_count, distinct_count, total_count)
+      select(variable, class, null_perc, distinct_perc, table, max, min, mean, median, standard_deviation, null_count, distinct_count, total_count)  
+    
+    names(describe$table) <- describe$variable
+  }
+  return(describe)
+}
+
+
+# Adds a top column (possibly add a top_1 and top_2 columns)
+f7 <- function(data, type = "basic") {
   if (type == "basic") {
     describe <- tibble::tibble(
       variable = names(data),
@@ -211,19 +282,7 @@ f6 <- function(data, type = "basic") {
   return(describe)
 }
 
-#Messing around with the table list column
-describe <- f6(i_data, type = "advanced")
-
-describe %>% filter(null_perc < .5) %>% select(variable, class, null_perc, distinct_perc, table, top_value, distinct_count) %>% print(n = Inf)
-select(describe, table) %>% print(n = Inf) %>% tidyr::unnest() # doesn't work.
-
-library(magrittr)
-describe %>% filter(null_perc < .1) %$% table
-
-system.time(
-  f4(i_data, type = "advanced")
-)
-
+# Test stuff
 system.time(
   f5(i_data, type = "advanced")
 )
@@ -232,10 +291,28 @@ system.time(
   f6(i_data, type = "advanced")
 )
 
-system.time(
-  prep_describe(i_data)
-)
+describe <- f5(mtcars, type = "advanced")
 
+# it
+describe %>% filter(distinct_perc < .1) %>% select_df(table) %>% filter(value_rank <= 3) %>% print(n = Inf)
+
+select_df(describe$table) %>% print(n = Inf)
+
+
+# create a function that will allow you to select in this manner from tibble lists...
+  # not sure why but dplyr removes names when filtering.
+lselect <- function(data, column) {
+  column <- enquo(column)
+  # use something like "data %>% select(!!column) %>% tidyr::unnest(.id = "name") %>% class" to determine if it's a data frame.
+  data %>% select(!!column) %>% tidyr::unnest(.id = "name")
+}
+
+
+
+
+describe %>% select(table) %>% tidyr::unnest(.id = "name") %>% class
+
+data %>% select(table)
 
 # profile the functions
 Rprof(tmp <- tempfile())
@@ -252,19 +329,6 @@ Rprof(tmp <- tempfile())
 f5(i_data, type = "advanced")
 Rprof()
 summaryRprof(tmp)
-
-#find most frequent value (this isn't what I want!)
-# base it on the list column. Just grab the 1st.
-library(magrittr)
-purrr::map(describe$table, ~data.table::first(.x))
-
-purrr::map_chr(describe$table, ~data.table::first(.x) %$% value)
-
-map(i_data, ~which.max(.x))
-x <- c(1:4, 0:5, 11)
-which.min(x)
-which.max(x)
-
 
 # possibly use this method later
 fncts <- list(
